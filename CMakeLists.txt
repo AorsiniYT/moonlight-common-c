@@ -9,14 +9,25 @@ option(CODE_ANALYSIS "Run code analysis during compilation" OFF)
 
 SET(CMAKE_C_STANDARD 11)
 
+
+# Usar enet desde el path correcto relativo al proyecto
 set(CMAKE_POSITION_INDEPENDENT_CODE_BACKUP ${CMAKE_POSITION_INDEPENDENT_CODE})
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-add_subdirectory(enet)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../enet ${CMAKE_CURRENT_BINARY_DIR}/enet)
 set(CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE_BACKUP})
 unset(CMAKE_POSITION_INDEPENDENT_CODE_BACKUP)
 
-aux_source_directory(src SRC_LIST)
-aux_source_directory(reedsolomon SRC_LIST)
+
+# Excluir Limelight.c del build normal (solo incluirlo si se define USE_LIMELIGHT_STUB)
+file(GLOB MOONLIGHT_SRC_FILES src/*.c)
+list(REMOVE_ITEM MOONLIGHT_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/Limelight.c)
+file(GLOB REEDSOLOMON_SRC_FILES reedsolomon/*.c)
+set(SRC_LIST ${MOONLIGHT_SRC_FILES} ${REEDSOLOMON_SRC_FILES})
+
+# Si se define USE_LIMELIGHT_STUB, incluir Limelight.c
+if(USE_LIMELIGHT_STUB)
+    list(APPEND SRC_LIST src/Limelight.c)
+endif()
 
 # Build shared library by default, but allows user override
 if (NOT DEFINED BUILD_SHARED_LIBS)
@@ -24,7 +35,20 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
   set(BUILD_SHARED_LIBS_OVERRIDE ON)
 endif()
 
+
+# Asegura que la carpeta reedsolomon esté en los includes del target moonlight-common-c
 add_library(moonlight-common-c ${SRC_LIST})
+target_include_directories(moonlight-common-c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/reedsolomon)
+
+
+# Incluir headers y enlazar OpenSSL en MinGW/Windows
+if(MINGW)
+    target_include_directories(moonlight-common-c PUBLIC ${CMAKE_SOURCE_DIR}/openssl-mingw/include)
+    target_link_libraries(moonlight-common-c PRIVATE
+        ${CMAKE_SOURCE_DIR}/openssl-mingw/lib/libcrypto.a
+        ${CMAKE_SOURCE_DIR}/openssl-mingw/lib/libssl.a
+    )
+endif()
 
 if (BUILD_SHARED_LIBS_OVERRIDE)
   unset(BUILD_SHARED_LIBS)
@@ -56,6 +80,11 @@ if (USE_MBEDTLS)
     target_link_libraries(moonlight-common-c PRIVATE mbedcrypto)
   endif()
 else()
+  # Forzar rutas de OpenSSL para MinGW/Windows
+  if(MINGW)
+    # No buscar OpenSSL ni forzar find_package en MinGW/Windows, ya que los fuentes se incluyen directamente en el ejecutable principal
+    return()
+  endif()
   find_package(OpenSSL 1.0.2 REQUIRED)
   target_link_libraries(moonlight-common-c PRIVATE ${OPENSSL_CRYPTO_LIBRARY})
   target_include_directories(moonlight-common-c SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
